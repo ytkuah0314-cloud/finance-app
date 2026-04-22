@@ -1,0 +1,825 @@
+<!DOCTYPE html>
+<html lang="zh-Hans">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no"/>
+<meta name="apple-mobile-web-app-capable" content="yes"/>
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"/>
+<meta name="apple-mobile-web-app-title" content="我的记账本"/>
+<title>我的记账本</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+html,body{margin:0;padding:0;background:#0b0e14;min-height:100vh;overscroll-behavior:none}
+#root{min-height:100vh}
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel">
+const { useState, useMemo, useEffect, useCallback } = React;
+
+// ── Supabase ──────────────────────────────────────────────────────────────────
+const SUPA_URL = "https://fnrslihzvocghlxweeao.supabase.co";
+const SUPA_KEY = "sb_publishable_hPv_N2ETrPWO8W6_Z9K9OA_OhqXbwz2";
+const sb = supabase.createClient(SUPA_URL, SUPA_KEY);
+
+// ── Constants ─────────────────────────────────────────────────────────────────
+const EXPENSE_CATS = [
+  { id:"food",          label:"餐饮",      icon:"🍜", color:"#f97316" },
+  { id:"shopping",      label:"购物",      icon:"🛍️", color:"#a855f7" },
+  { id:"housing",       label:"住宿",      icon:"🏠", color:"#3b82f6" },
+  { id:"entertainment", label:"娱乐",      icon:"🎮", color:"#ec4899" },
+  { id:"transport",     label:"交通",      icon:"🚗", color:"#14b8a6" },
+  { id:"pet",           label:"宠物",      icon:"🐾", color:"#f59e0b" },
+  { id:"medical",       label:"医疗/保险", icon:"💊", color:"#ef4444" },
+  { id:"fees",          label:"花费",      icon:"💸", color:"#64748b" },
+  { id:"other_exp",     label:"其他",      icon:"📦", color:"#94a3b8" },
+];
+const INCOME_CATS = [
+  { id:"salary",     label:"工资",     icon:"💼", color:"#34d399" },
+  { id:"sidejob",    label:"兼职副业", icon:"🔧", color:"#6ee7b7" },
+  { id:"investment", label:"投资理财", icon:"📈", color:"#10b981" },
+  { id:"angpao",     label:"红包",     icon:"🧧", color:"#f87171" },
+  { id:"other_inc",  label:"其他收入", icon:"💰", color:"#a3e635" },
+];
+const ALL_CATS   = [...EXPENSE_CATS, ...INCOME_CATS];
+const PAY_METHODS = [
+  { id:"tng",    label:"Touch n Go" },
+  { id:"bank",   label:"银行" },
+  { id:"credit", label:"信用卡" },
+  { id:"cash",   label:"现金" },
+];
+const MONTHS_ZH   = ["一月","二月","三月","四月","五月","六月","七月","八月","九月","十月","十一月","十二月"];
+const TARGET      = 100000;
+const SPLIT       = { savings:30, needs:50, wants:20 };
+const WANTS_CATS  = ["entertainment","shopping","pet","other_exp"];
+const NEEDS_CATS  = ["food","housing","transport","medical","fees"];
+const FOOD_BUDGET = 1000;
+
+const fmt    = n => "RM " + Math.abs(Number(n)).toLocaleString("en-MY",{minimumFractionDigits:2,maximumFractionDigits:2});
+const getCat = id => ALL_CATS.find(c=>c.id===id)||{label:id,icon:"•",color:"#94a3b8"};
+const genId  = () => Math.random().toString(36).slice(2,9);
+const today  = () => new Date().toISOString().slice(0,10);
+
+const INIT_BANKS = [
+  {id:"pb",  name:"Public Bank", balance:18658.08, last_updated:today()},
+  {id:"uob", name:"UOB",         balance:0,        last_updated:today()},
+];
+
+const SEED = [
+  {id:genId(),date:"2026-04-01",type:"expense",category:"food",         amount:14.50, method:"tng",  note:"鸡饭"},
+  {id:genId(),date:"2026-04-01",type:"expense",category:"food",         amount:16.00, method:"tng",  note:"兰州拉面"},
+  {id:genId(),date:"2026-04-02",type:"expense",category:"food",         amount:18.00, method:"tng",  note:"回锅肉"},
+  {id:genId(),date:"2026-04-02",type:"expense",category:"food",         amount:5.90,  method:"tng",  note:"小杯"},
+  {id:genId(),date:"2026-04-02",type:"expense",category:"food",         amount:45.60, method:"tng",  note:"橄榄油柠檬"},
+  {id:genId(),date:"2026-04-02",type:"expense",category:"food",         amount:10.00, method:"tng",  note:"鸳鸯"},
+  {id:genId(),date:"2026-04-03",type:"expense",category:"housing",      amount:750,   method:"bank", note:"房租"},
+  {id:genId(),date:"2026-04-03",type:"expense",category:"food",         amount:10.50, method:"tng",  note:"板面"},
+  {id:genId(),date:"2026-04-03",type:"expense",category:"food",         amount:8.70,  method:"tng",  note:"经济饭"},
+  {id:genId(),date:"2026-04-04",type:"expense",category:"food",         amount:16.95, method:"tng",  note:"小碗菜"},
+  {id:genId(),date:"2026-04-04",type:"expense",category:"food",         amount:7.50,  method:"tng",  note:"柠檬"},
+  {id:genId(),date:"2026-04-05",type:"expense",category:"entertainment",amount:239,   method:"tng",  note:"红色沙漠"},
+  {id:genId(),date:"2026-04-05",type:"expense",category:"food",         amount:1.60,  method:"tng",  note:"面包"},
+  {id:genId(),date:"2026-04-05",type:"expense",category:"entertainment",amount:7.00,  method:"tng",  note:"打球"},
+  {id:genId(),date:"2026-04-05",type:"expense",category:"transport",    amount:48.60, method:"tng",  note:"Grab"},
+  {id:genId(),date:"2026-04-05",type:"expense",category:"food",         amount:9.00,  method:"tng",  note:"经济饭"},
+  {id:genId(),date:"2026-04-06",type:"expense",category:"entertainment",amount:67.85, method:"tng",  note:"山海(yx)"},
+  {id:genId(),date:"2026-04-06",type:"expense",category:"transport",    amount:5.30,  method:"tng",  note:"Grab"},
+  {id:genId(),date:"2026-04-06",type:"expense",category:"entertainment",amount:10.00, method:"tng",  note:"Jambu"},
+  {id:genId(),date:"2026-04-06",type:"expense",category:"entertainment",amount:10.00, method:"tng",  note:"Chempedak"},
+  {id:genId(),date:"2026-04-06",type:"expense",category:"food",         amount:10.00, method:"tng",  note:"章鱼小丸子"},
+  {id:genId(),date:"2026-04-06",type:"expense",category:"food",         amount:8.00,  method:"tng",  note:"薄饼"},
+  {id:genId(),date:"2026-04-06",type:"expense",category:"food",         amount:6.60,  method:"tng",  note:"豆水"},
+  {id:genId(),date:"2026-04-06",type:"expense",category:"food",         amount:11.00, method:"tng",  note:"炒粿角"},
+  {id:genId(),date:"2026-04-06",type:"expense",category:"food",         amount:7.50,  method:"tng",  note:"炒粿角"},
+  {id:genId(),date:"2026-04-06",type:"expense",category:"food",         amount:8.00,  method:"tng",  note:"Loklok"},
+  {id:genId(),date:"2026-04-06",type:"expense",category:"food",         amount:20.15, method:"tng",  note:"Yogurt"},
+  {id:genId(),date:"2026-04-06",type:"expense",category:"transport",    amount:31.60, method:"tng",  note:"Grab to SS2"},
+  {id:genId(),date:"2026-04-06",type:"income", category:"salary",       amount:5940.30,method:"tng", note:"工资"},
+  {id:genId(),date:"2026-04-07",type:"expense",category:"food",         amount:9.95,  method:"tng",  note:"Subway"},
+  {id:genId(),date:"2026-04-07",type:"expense",category:"food",         amount:76.55, method:"bank", note:"Timothy"},
+  {id:genId(),date:"2026-04-07",type:"expense",category:"food",         amount:57.00, method:"bank", note:"冰淇淋"},
+  {id:genId(),date:"2026-04-07",type:"expense",category:"food",         amount:10.00, method:"tng",  note:"Milo"},
+  {id:genId(),date:"2026-04-07",type:"expense",category:"other_exp",    amount:12.10, method:"tng",  note:"生活用品"},
+  {id:genId(),date:"2026-04-07",type:"expense",category:"food",         amount:41.75, method:"tng",  note:"韩国餐"},
+  {id:genId(),date:"2026-04-08",type:"expense",category:"food",         amount:46.85, method:"tng",  note:"Nasi Lemak"},
+  {id:genId(),date:"2026-04-08",type:"expense",category:"food",         amount:26.60, method:"tng",  note:"MCD"},
+  {id:genId(),date:"2026-04-09",type:"expense",category:"food",         amount:16.00, method:"tng",  note:"兰州拉面"},
+  {id:genId(),date:"2026-04-09",type:"expense",category:"food",         amount:8.70,  method:"tng",  note:"经济饭"},
+  {id:genId(),date:"2026-04-10",type:"expense",category:"food",         amount:11.00, method:"tng",  note:"经济饭"},
+  {id:genId(),date:"2026-04-10",type:"expense",category:"food",         amount:8.00,  method:"tng",  note:"板面"},
+  {id:genId(),date:"2026-04-11",type:"expense",category:"transport",    amount:22.30, method:"tng",  note:"Grab to看房"},
+  {id:genId(),date:"2026-04-11",type:"expense",category:"food",         amount:9.00,  method:"tng",  note:"经济饭"},
+  {id:genId(),date:"2026-04-11",type:"expense",category:"entertainment",amount:15.85, method:"tng",  note:"PUBG充值"},
+  {id:genId(),date:"2026-04-12",type:"expense",category:"entertainment",amount:7.00,  method:"tng",  note:"打球"},
+  {id:genId(),date:"2026-04-12",type:"expense",category:"food",         amount:2.00,  method:"tng",  note:"水"},
+  {id:genId(),date:"2026-04-12",type:"expense",category:"transport",    amount:9.30,  method:"bank", note:"Grab"},
+  {id:genId(),date:"2026-04-12",type:"expense",category:"food",         amount:13.30, method:"tng",  note:"Mamak"},
+  {id:genId(),date:"2026-04-12",type:"expense",category:"food",         amount:5.00,  method:"tng",  note:"杯面"},
+  {id:genId(),date:"2026-04-13",type:"expense",category:"food",         amount:22.00, method:"tng",  note:"买给yx吃"},
+  {id:genId(),date:"2026-04-13",type:"expense",category:"food",         amount:12.00, method:"tng",  note:"姜葱鸡饭"},
+  {id:genId(),date:"2026-04-13",type:"expense",category:"housing",      amount:29.58, method:"tng",  note:"电费"},
+  {id:genId(),date:"2026-04-13",type:"expense",category:"shopping",     amount:250,   method:"bank", note:"yx礼物"},
+  {id:genId(),date:"2026-04-13",type:"expense",category:"food",         amount:8.50,  method:"tng",  note:"经济饭"},
+  {id:genId(),date:"2026-04-13",type:"expense",category:"entertainment",amount:51.61, method:"cash", note:"PUBG排位"},
+  {id:genId(),date:"2026-04-14",type:"expense",category:"food",         amount:8.50,  method:"tng",  note:"鸡饭"},
+  {id:genId(),date:"2026-04-14",type:"expense",category:"fees",         amount:99.90, method:"tng",  note:"Claude订阅"},
+  {id:genId(),date:"2026-04-14",type:"expense",category:"food",         amount:9.50,  method:"tng",  note:"经济饭"},
+  {id:genId(),date:"2026-04-15",type:"expense",category:"food",         amount:3.50,  method:"tng",  note:"包"},
+  {id:genId(),date:"2026-04-15",type:"expense",category:"medical",      amount:265,   method:"bank", note:"保险"},
+  {id:genId(),date:"2026-04-16",type:"expense",category:"food",         amount:10.50, method:"tng",  note:"板面"},
+  {id:genId(),date:"2026-04-16",type:"expense",category:"food",         amount:8.70,  method:"tng",  note:"经济饭"},
+  {id:genId(),date:"2026-04-17",type:"expense",category:"housing",      amount:250,   method:"bank", note:"续约费"},
+  {id:genId(),date:"2026-04-17",type:"expense",category:"food",         amount:8.40,  method:"tng",  note:"经济饭"},
+  {id:genId(),date:"2026-04-18",type:"expense",category:"food",         amount:16.00, method:"tng",  note:"兰州拉面"},
+  {id:genId(),date:"2026-04-18",type:"expense",category:"food",         amount:11.40, method:"tng",  note:"经济饭"},
+  {id:genId(),date:"2026-04-19",type:"expense",category:"food",         amount:7.90,  method:"tng",  note:"Aeon Nasi Lemak"},
+  {id:genId(),date:"2026-04-19",type:"expense",category:"food",         amount:8.50,  method:"tng",  note:"经济饭"},
+  {id:genId(),date:"2026-04-20",type:"expense",category:"entertainment",amount:24.00, method:"tng",  note:"打球"},
+  {id:genId(),date:"2026-04-20",type:"expense",category:"transport",    amount:8.30,  method:"cash", note:"Grab"},
+  {id:genId(),date:"2026-04-20",type:"expense",category:"transport",    amount:13.30, method:"cash", note:"Grab to MRT"},
+  {id:genId(),date:"2026-04-20",type:"expense",category:"transport",    amount:17.30, method:"cash", note:"Grab to Pacific Star"},
+  {id:genId(),date:"2026-04-21",type:"expense",category:"food",         amount:8.00,  method:"tng",  note:"Roti Telur Bawang"},
+  {id:genId(),date:"2026-04-21",type:"expense",category:"food",         amount:8.50,  method:"tng",  note:"鸡饭"},
+  {id:genId(),date:"2026-04-22",type:"expense",category:"food",         amount:4.50,  method:"tng",  note:"Kopitiam"},
+  {id:genId(),date:"2026-04-22",type:"expense",category:"transport",    amount:66.00, method:"tng",  note:"KTM"},
+  {id:genId(),date:"2026-04-22",type:"expense",category:"transport",    amount:49.30, method:"cash", note:"Bus to PB"},
+];
+
+// ── CSS ───────────────────────────────────────────────────────────────────────
+const CSS = `
+@import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;700&family=Instrument+Serif:ital@0;1&display=swap');
+*{box-sizing:border-box;margin:0;padding:0}
+body{-webkit-tap-highlight-color:transparent}
+::-webkit-scrollbar{width:4px}::-webkit-scrollbar-thumb{background:#1e293b;border-radius:4px}
+.card{background:#111827;border:1px solid #1e293b;border-radius:16px}
+.tab-btn{background:none;border:none;font-family:inherit;color:#475569;font-size:11px;cursor:pointer;display:flex;flex-direction:column;align-items:center;gap:3px;padding:8px 4px;transition:color .2s;position:relative;flex:1}
+.tab-btn.active{color:#34d399}
+.btn-primary{background:linear-gradient(135deg,#34d399,#059669);border:none;color:#fff;font-family:inherit;font-weight:700;cursor:pointer;border-radius:12px;padding:14px 20px;font-size:14px;transition:all .2s}
+.btn-primary:active{transform:scale(.97)}
+.btn-sm{background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.1);color:#94a3b8;font-family:inherit;font-size:12px;cursor:pointer;border-radius:8px;padding:4px 10px;}
+.btn-danger{background:rgba(239,68,68,.1);border:1px solid rgba(239,68,68,.2);color:#ef4444}
+input,select,textarea{background:#1e293b;border:1px solid #334155;border-radius:10px;color:#e2e8f0;font-family:inherit;font-size:14px;padding:10px 14px;width:100%;transition:border .2s}
+input:focus,select:focus,textarea:focus{outline:none;border-color:#34d399}
+select option{background:#1e293b}
+.tx-row{border-bottom:1px solid #1e293b;padding:12px 0;display:flex;align-items:center;gap:12px}
+.tx-row:last-child{border-bottom:none}
+.pbar-bg{height:6px;border-radius:3px;background:#1e293b;overflow:hidden}
+.pbar-fill{height:100%;border-radius:3px;transition:width .8s cubic-bezier(.34,1.56,.64,1)}
+.fade-up{animation:fu .35s ease forwards}
+@keyframes fu{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:translateY(0)}}
+.modal-bg{position:fixed;inset:0;background:rgba(0,0,0,.75);backdrop-filter:blur(6px);z-index:50;display:flex;align-items:flex-end}
+.modal{background:#0f172a;border:1px solid #1e293b;border-radius:24px 24px 0 0;padding:24px;width:100%;max-height:90vh;overflow-y:auto;animation:slideUp .28s ease}
+@keyframes slideUp{from{transform:translateY(100%)}to{transform:translateY(0)}}
+.seg-btn{flex:1;background:none;border:none;font-family:inherit;font-size:13px;cursor:pointer;padding:8px;border-radius:10px;color:#64748b;transition:all .2s}
+.seg-btn.active{background:#1e293b;color:#e2e8f0}
+.chip{border:none;border-radius:10px;padding:8px 12px;font-size:12px;font-family:inherit;cursor:pointer;display:flex;align-items:center;gap:6px}
+.alert-dot{position:absolute;top:3px;right:6px;width:7px;height:7px;background:#ef4444;border-radius:50%;border:2px solid #0b0e14}
+.bank-card{border-radius:20px;padding:20px;cursor:pointer;position:relative;overflow:hidden;transition:transform .2s}
+.bank-card:active{transform:scale(.98)}
+@keyframes alertPop{from{opacity:0;transform:scale(.85)}to{opacity:1;transform:scale(1)}}
+.sync-dot{width:7px;height:7px;border-radius:50%;display:inline-block;margin-right:5px}
+`;
+
+// ── Shared UI ─────────────────────────────────────────────────────────────────
+function PBar({pct,color}) {
+  return <div className="pbar-bg"><div className="pbar-fill" style={{width:`${pct}%`,background:color}}/></div>;
+}
+
+function BudgetRow({label,icon,spent,budget,color}) {
+  if(budget<=0) return null;
+  const pct=Math.min((spent/budget)*100,100),over=spent>budget,near=pct>=80&&!over;
+  const bc=over?"#ef4444":near?"#fbbf24":color;
+  return (
+    <div style={{background:over?"#ef444411":near?"#fbbf2411":"transparent",border:`1px solid ${over?"#ef444433":near?"#fbbf2433":"#1e293b"}`,borderRadius:12,padding:"10px 12px",marginBottom:10}}>
+      <div style={{display:"flex",justifyContent:"space-between",marginBottom:6}}>
+        <span style={{fontSize:13}}>{icon} {label}</span>
+        <div><span style={{fontSize:13,fontWeight:600,color:bc}}>{fmt(spent)}</span><span style={{fontSize:11,color:"#475569"}}> / {fmt(budget)}</span></div>
+      </div>
+      <PBar pct={pct} color={bc}/>
+      <div style={{display:"flex",justifyContent:"space-between",marginTop:4}}>
+        <span style={{fontSize:10,color:"#475569"}}>{pct.toFixed(0)}% 已用</span>
+        {over?<span style={{fontSize:10,color:"#ef4444",fontWeight:600}}>⚠️ 超出 {fmt(spent-budget)}</span>
+            :near?<span style={{fontSize:10,color:"#fbbf24"}}>⚡ 快超额！还剩 {fmt(budget-spent)}</span>
+            :<span style={{fontSize:10,color:"#334155"}}>剩余 {fmt(budget-spent)}</span>}
+      </div>
+    </div>
+  );
+}
+
+function FoodCard({foodSpent,filterYear,filterMonth}) {
+  const now=new Date(),isCurr=filterYear===now.getFullYear()&&filterMonth===now.getMonth();
+  const totalDays=new Date(filterYear,filterMonth+1,0).getDate();
+  const passed=isCurr?now.getDate():totalDays,daysLeft=isCurr?totalDays-now.getDate():0;
+  const remaining=FOOD_BUDGET-foodSpent,pct=Math.min((foodSpent/FOOD_BUDGET)*100,100);
+  const over=foodSpent>FOOD_BUDGET,near=pct>=80&&!over,bc=over?"#ef4444":near?"#fbbf24":"#f97316";
+  const dailyAvg=passed>0?foodSpent/passed:0,dailyLeft=daysLeft>0&&!over?remaining/daysLeft:0;
+  return (
+    <div style={{background:over?"#ef444411":near?"#fbbf2411":"#111827",border:`1px solid ${over?"#ef444433":near?"#fbbf2433":"#f9731633"}`,borderRadius:16,padding:16,marginBottom:16}}>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
+        <div style={{display:"flex",alignItems:"center",gap:10}}>
+          <div style={{width:36,height:36,borderRadius:10,background:"#f9731622",display:"flex",alignItems:"center",justifyContent:"center",fontSize:20}}>🍜</div>
+          <div><div style={{fontSize:14,fontWeight:600}}>餐饮预算</div><div style={{fontSize:11,color:"#64748b"}}>每月上限 {fmt(FOOD_BUDGET)}</div></div>
+        </div>
+        <div style={{textAlign:"right"}}><div style={{fontSize:22,fontWeight:800,color:bc}}>{fmt(foodSpent)}</div><div style={{fontSize:11,color:"#475569"}}>已花费</div></div>
+      </div>
+      <div style={{background:"#0b0e14",borderRadius:6,height:10,overflow:"hidden",marginBottom:6}}>
+        <div style={{width:`${pct}%`,height:"100%",background:`linear-gradient(90deg,#f97316,${bc})`,borderRadius:6,transition:"width .8s"}}/>
+      </div>
+      <div style={{display:"flex",justifyContent:"space-between",marginBottom:14}}>
+        <span style={{fontSize:11,color:"#475569"}}>{pct.toFixed(0)}% 已用</span>
+        {over?<span style={{fontSize:11,color:"#ef4444",fontWeight:600}}>超出 {fmt(foodSpent-FOOD_BUDGET)}</span>:<span style={{fontSize:11,color:bc,fontWeight:600}}>还剩 {fmt(remaining)}</span>}
+      </div>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8}}>
+        {[
+          {label:"日均花费",val:`${fmt(dailyAvg)}/天`,color:"#94a3b8"},
+          {label:isCurr?"剩余天数":"本月天数",val:`${isCurr?daysLeft:totalDays} 天`,color:"#60a5fa"},
+          {label:over?"已超支":isCurr&&daysLeft>0?"每天可用":"月底结余",val:over?fmt(foodSpent-FOOD_BUDGET):isCurr&&daysLeft>0?`${fmt(dailyLeft)}/天`:fmt(remaining),color:over?"#ef4444":near?"#fbbf24":"#34d399"},
+        ].map(s=>(
+          <div key={s.label} style={{background:"rgba(255,255,255,.04)",borderRadius:10,padding:"8px 6px",textAlign:"center"}}>
+            <div style={{fontSize:10,color:"#475569",marginBottom:4}}>{s.label}</div>
+            <div style={{fontSize:12,fontWeight:700,color:s.color}}>{s.val}</div>
+          </div>
+        ))}
+      </div>
+      {near&&!over&&isCurr&&<div style={{marginTop:10,background:"#fbbf2411",borderRadius:10,padding:"8px 10px",fontSize:12,color:"#fbbf24"}}>⚡ 快超额！剩 {daysLeft} 天，每天只能花 {fmt(dailyLeft)}</div>}
+      {over&&<div style={{marginTop:10,background:"#ef444411",borderRadius:10,padding:"8px 10px",fontSize:12,color:"#fca5a5"}}>⚠️ 本月餐饮已超出预算 {fmt(foodSpent-FOOD_BUDGET)}</div>}
+    </div>
+  );
+}
+
+function OverAlert({data,onClose}) {
+  if(!data) return null;
+  const tips=data.type==="wants"?["减少外出娱乐，改为在家消遣","购物前列清单，避免冲动消费","寻找免费或低成本活动"]:["检查是否有不必要的固定支出","寻找更划算的日常替代方案","剩余天数严格按计划消费"];
+  return (
+    <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.85)",backdropFilter:"blur(8px)",zIndex:100,display:"flex",alignItems:"center",justifyContent:"center",padding:20}}>
+      <div style={{background:"#0f172a",border:"1px solid #ef444444",borderRadius:24,padding:28,maxWidth:340,width:"100%",animation:"alertPop .3s cubic-bezier(.34,1.56,.64,1)"}}>
+        <div style={{textAlign:"center",marginBottom:20}}>
+          <div style={{fontSize:48,marginBottom:8}}>⚠️</div>
+          <div style={{fontFamily:"'Instrument Serif',serif",fontSize:22,color:"#fbbf24",marginBottom:6}}>{data.label} 超额了！</div>
+          <div style={{fontSize:13,color:"#94a3b8"}}>本月 <b style={{color:"#f87171"}}>{data.icon} {data.label}</b> 已突破预算</div>
+        </div>
+        <div style={{background:"#1e293b",borderRadius:14,padding:14,marginBottom:18}}>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8,textAlign:"center"}}>
+            {[{l:"已花费",v:data.spent,c:"#f87171"},{l:"预算",v:data.budget,c:"#94a3b8"},{l:"超出",v:data.over,c:"#fbbf24"}].map(r=>(
+              <div key={r.l}><div style={{fontSize:10,color:"#475569",marginBottom:4}}>{r.l}</div><div style={{fontSize:13,fontWeight:700,color:r.c}}>{fmt(r.v)}</div></div>
+            ))}
+          </div>
+        </div>
+        <div style={{marginBottom:18}}>
+          <div style={{fontSize:11,color:"#64748b",marginBottom:8}}>💡 节省建议</div>
+          {tips.map((t,i)=><div key={i} style={{display:"flex",gap:8,marginBottom:6}}><span style={{color:"#fbbf24",fontSize:13,flexShrink:0}}>›</span><span style={{fontSize:13,color:"#94a3b8"}}>{t}</span></div>)}
+        </div>
+        <button onClick={onClose} style={{width:"100%",background:"linear-gradient(135deg,#ef4444,#dc2626)",border:"none",color:"#fff",fontFamily:"inherit",fontWeight:700,fontSize:14,cursor:"pointer",borderRadius:12,padding:14}}>我知道了，继续加油 💪</button>
+      </div>
+    </div>
+  );
+}
+
+function BankModal({bank,onSave,onClose}) {
+  const [name,setName]=useState(bank.name),[bal,setBal]=useState(String(bank.balance));
+  return (
+    <div className="modal-bg" onClick={e=>{if(e.target===e.currentTarget)onClose()}}>
+      <div className="modal">
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:20}}>
+          <h3 style={{fontFamily:"'Instrument Serif',serif",fontSize:20}}>更新户口余额</h3>
+          <button className="btn-sm" onClick={onClose}>✕</button>
+        </div>
+        <div style={{marginBottom:14}}>
+          <label style={{fontSize:12,color:"#64748b",display:"block",marginBottom:6}}>户口名称</label>
+          <input value={name} onChange={e=>setName(e.target.value)}/>
+        </div>
+        <div style={{marginBottom:22}}>
+          <label style={{fontSize:12,color:"#64748b",display:"block",marginBottom:6}}>当前余额 (RM)</label>
+          <div style={{position:"relative"}}>
+            <span style={{position:"absolute",left:12,top:"50%",transform:"translateY(-50%)",color:"#34d399",fontWeight:700}}>RM</span>
+            <input type="number" value={bal} onChange={e=>setBal(e.target.value)} style={{paddingLeft:44}} placeholder="0.00"/>
+          </div>
+        </div>
+        <button className="btn-primary" style={{width:"100%"}} onClick={()=>{onSave({name,balance:parseFloat(bal)||0,last_updated:today()});onClose();}}>保存更新</button>
+      </div>
+    </div>
+  );
+}
+
+// ── App ───────────────────────────────────────────────────────────────────────
+function App() {
+  const [tab,setTab]           = useState("wealth");
+  const [txs,setTxs]           = useState([]);
+  const [banks,setBanks]       = useState(INIT_BANKS);
+  const [salary,setSalary]     = useState("5940.30");
+  const [loading,setLoading]   = useState(true);
+  const [syncing,setSyncing]   = useState(false);
+  const [syncOk,setSyncOk]     = useState(true);
+  const [showForm,setShowForm] = useState(false);
+  const [editId,setEditId]     = useState(null);
+  const [editBank,setEditBank] = useState(null);
+  const [overAlert,setOverAlert] = useState(null);
+  const [txFilter,setTxFilter] = useState("all");
+  const [filterYear,setFilterYear]   = useState(2026);
+  const [filterMonth,setFilterMonth] = useState(new Date().getMonth());
+  const [salInput,setSalInput] = useState("");
+  const [formData,setFormData] = useState({date:today(),type:"expense",category:"food",amount:"",method:"tng",note:""});
+
+  // ── Load from Supabase on mount ──
+  useEffect(()=>{
+    async function load() {
+      setLoading(true);
+      try {
+        // Load transactions
+        const {data:txData,error:txErr} = await sb.from("transactions").select("*").order("date",{ascending:false});
+        if(txErr) throw txErr;
+        if(txData && txData.length>0) {
+          setTxs(txData);
+        } else {
+          // First time: seed the data
+          const {error:seedErr} = await sb.from("transactions").insert(SEED);
+          if(!seedErr) setTxs(SEED);
+        }
+
+        // Load banks
+        const {data:bankData,error:bankErr} = await sb.from("banks").select("*");
+        if(bankErr) throw bankErr;
+        if(bankData && bankData.length>0) {
+          setBanks(bankData);
+        } else {
+          const {error:bseedErr} = await sb.from("banks").insert(INIT_BANKS);
+          if(!bseedErr) setBanks(INIT_BANKS);
+        }
+
+        // Load salary setting
+        const {data:salData} = await sb.from("settings").select("value").eq("key","salary").single();
+        if(salData) setSalary(salData.value);
+
+        setSyncOk(true);
+      } catch(e) {
+        console.error("Load error:",e);
+        setSyncOk(false);
+        // Fallback to seed data offline
+        setTxs(SEED);
+      }
+      setLoading(false);
+    }
+    load();
+  },[]);
+
+  // ── Realtime subscription ──
+  useEffect(()=>{
+    const channel = sb.channel("db-changes")
+      .on("postgres_changes",{event:"*",schema:"public",table:"transactions"},payload=>{
+        if(payload.eventType==="INSERT") setTxs(t=>[payload.new,...t.filter(x=>x.id!==payload.new.id)]);
+        if(payload.eventType==="UPDATE") setTxs(t=>t.map(x=>x.id===payload.new.id?payload.new:x));
+        if(payload.eventType==="DELETE") setTxs(t=>t.filter(x=>x.id!==payload.old.id));
+      })
+      .on("postgres_changes",{event:"*",schema:"public",table:"banks"},payload=>{
+        if(payload.eventType==="UPDATE") setBanks(b=>b.map(x=>x.id===payload.new.id?payload.new:x));
+      })
+      .subscribe();
+    return ()=>sb.removeChannel(channel);
+  },[]);
+
+  // ── Derived ──
+  const txYear   = useMemo(()=>txs.filter(t=>t.date&&t.date.startsWith(String(filterYear))),[txs,filterYear]);
+  const moPrefix = `${filterYear}-${String(filterMonth+1).padStart(2,"0")}`;
+  const txMonth  = useMemo(()=>txYear.filter(t=>t.date&&t.date.startsWith(moPrefix)),[txYear,moPrefix]);
+
+  const s2 = (arr,type) => arr.filter(t=>t.type===type).reduce((s,t)=>s+t.amount,0);
+  const catBreakdown = (arr,type) => {
+    const cats = type==="expense"?EXPENSE_CATS:INCOME_CATS;
+    return cats.map(c=>({...c,total:arr.filter(t=>t.type===type&&t.category===c.id).reduce((s,t)=>s+t.amount,0)})).filter(c=>c.total>0).sort((a,b)=>b.total-a.total);
+  };
+
+  const parsedSal  = parseFloat(salary)||0;
+  const alloc      = {savings:parsedSal*SPLIT.savings/100,needs:parsedSal*SPLIT.needs/100,wants:parsedSal*SPLIT.wants/100};
+  const wantsSpent = useMemo(()=>txMonth.filter(t=>t.type==="expense"&&WANTS_CATS.includes(t.category)).reduce((s,t)=>s+t.amount,0),[txMonth]);
+  const needsSpent = useMemo(()=>txMonth.filter(t=>t.type==="expense"&&NEEDS_CATS.includes(t.category)).reduce((s,t)=>s+t.amount,0),[txMonth]);
+  const foodSpent  = useMemo(()=>txMonth.filter(t=>t.type==="expense"&&t.category==="food").reduce((s,t)=>s+t.amount,0),[txMonth]);
+  const totalWealth = banks.reduce((s,b)=>s+b.balance,0);
+  const goalPct     = Math.min((totalWealth/TARGET)*100,100);
+  const monthsLeft  = alloc.savings>0?Math.ceil(Math.max(TARGET-totalWealth,0)/alloc.savings):null;
+
+  const openForm  = () => {setEditId(null);setFormData({date:today(),type:"expense",category:"food",amount:"",method:"tng",note:""});setShowForm(true);};
+  const startEdit = tx => {setFormData({...tx,amount:String(tx.amount)});setEditId(tx.id);setShowForm(true);};
+
+  const deleteTx = async id => {
+    setTxs(t=>t.filter(x=>x.id!==id));
+    await sb.from("transactions").delete().eq("id",id);
+  };
+
+  const handleSalary = async () => {
+    const v=parseFloat(salInput); if(!v) return;
+    setSalary(salInput);
+    await sb.from("settings").upsert({key:"salary",value:salInput});
+    const nt={id:genId(),date:today(),type:"income",category:"salary",amount:v,method:"bank",note:"月薪"};
+    setTxs(t=>[nt,...t]);
+    await sb.from("transactions").insert(nt);
+  };
+
+  const submitForm = async () => {
+    if(!formData.amount||!formData.date) return;
+    const tx={...formData,amount:parseFloat(formData.amount),id:editId||genId()};
+    setSyncing(true);
+    if(editId) {
+      setTxs(t=>t.map(x=>x.id===editId?tx:x));
+      await sb.from("transactions").update(tx).eq("id",editId);
+    } else {
+      setTxs(t=>[tx,...t]);
+      await sb.from("transactions").insert(tx);
+    }
+    setSyncing(false);
+    setShowForm(false); setEditId(null);
+    setFormData({date:today(),type:"expense",category:"food",amount:"",method:"tng",note:""});
+    if(!editId&&tx.type==="expense"&&parsedSal>0&&tx.date.slice(0,7)===moPrefix){
+      const isW=WANTS_CATS.includes(tx.category),isN=NEEDS_CATS.includes(tx.category);
+      const nW=wantsSpent+(isW?tx.amount:0),nN=needsSpent+(isN?tx.amount:0);
+      if(isW&&nW>alloc.wants) setOverAlert({type:"wants",label:"生活品质",icon:"✨",spent:nW,budget:alloc.wants,over:nW-alloc.wants});
+      else if(isN&&nN>alloc.needs) setOverAlert({type:"needs",label:"必要支出",icon:"🏠",spent:nN,budget:alloc.needs,over:nN-alloc.needs});
+    }
+  };
+
+  const updateBank = async (id,upd) => {
+    setBanks(b=>b.map(x=>x.id===id?{...x,...upd}:x));
+    await sb.from("banks").update(upd).eq("id",id);
+  };
+
+  const filteredTxs = useMemo(()=>{
+    let arr=[...txs].sort((a,b)=>(b.date||"").localeCompare(a.date||""));
+    if(txFilter!=="all") arr=arr.filter(t=>t.type===txFilter);
+    return arr;
+  },[txs,txFilter]);
+
+  const monthlyTxs = useMemo(()=>[...txMonth].sort((a,b)=>(b.date||"").localeCompare(a.date||"")),[txMonth]);
+  const anyOver    = (alloc.wants>0&&wantsSpent>alloc.wants)||(alloc.needs>0&&needsSpent>alloc.needs);
+  const bp = {wantsSpent,needsSpent,alloc,parsedSal,foodSpent,filterYear,filterMonth};
+
+  const TABS=[
+    {id:"wealth",label:"资产",icon:"💎"},
+    {id:"dashboard",label:"仪表板",icon:"⚡"},
+    {id:"monthly",label:"月度",icon:"🗓️"},
+    {id:"transactions",label:"流水",icon:"📋"},
+    {id:"allocator",label:"薪水",icon:"💰"},
+  ];
+
+  if(loading) return (
+    <div style={{minHeight:"100vh",background:"#0b0e14",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:16}}>
+      <div style={{fontSize:40}}>💰</div>
+      <div style={{fontFamily:"'Instrument Serif',serif",fontSize:22,color:"#e2e8f0"}}>加载中...</div>
+      <div style={{fontSize:13,color:"#475569"}}>正在从云端同步数据</div>
+    </div>
+  );
+
+  return (
+    <div style={{minHeight:"100vh",background:"#0b0e14",fontFamily:"'DM Sans',sans-serif",color:"#e2e8f0",paddingBottom:80}}>
+      <style>{CSS}</style>
+
+      {/* Header */}
+      <div style={{padding:"20px 16px 0",background:"linear-gradient(180deg,#0f172a,#0b0e14)"}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+          <div>
+            <div style={{fontSize:11,color:"#34d399",letterSpacing:2,textTransform:"uppercase",display:"flex",alignItems:"center"}}>
+              <span className="sync-dot" style={{background:syncOk?"#34d399":"#ef4444"}}/>
+              {syncOk?"已同步":"离线模式"}
+            </div>
+            <h1 style={{fontFamily:"'Instrument Serif',serif",fontSize:26,fontWeight:400,color:"#f8fafc"}}>账本系统</h1>
+          </div>
+          <div style={{display:"flex",alignItems:"center",gap:8}}>
+            {syncing&&<div style={{fontSize:11,color:"#fbbf24"}}>同步中...</div>}
+            <button className="btn-primary" style={{padding:"10px 16px",fontSize:13}} onClick={openForm}>+ 记账</button>
+          </div>
+        </div>
+      </div>
+
+      {/* Pages */}
+      <div style={{padding:16}}>
+        {tab==="wealth"&&<WealthPage banks={banks} setEditBank={setEditBank} totalWealth={totalWealth} goalPct={goalPct} monthsLeft={monthsLeft} alloc={alloc} parsedSal={parsedSal} salInput={salInput} setSalInput={setSalInput} handleSalary={handleSalary} salary={salary}/>}
+        {tab==="dashboard"&&<DashPage txs={txs} filterYear={filterYear} totalWealth={totalWealth} goalPct={goalPct} {...bp}/>}
+        {tab==="monthly"&&<MonthPage txMonth={monthlyTxs} monthIncome={s2(txMonth,"income")} monthExpense={s2(txMonth,"expense")} setFilterMonth={setFilterMonth} setFilterYear={setFilterYear} catBreakdown={catBreakdown} startEdit={startEdit} deleteTx={deleteTx} {...bp}/>}
+        {tab==="transactions"&&<TxPage txs={filteredTxs} txFilter={txFilter} setTxFilter={setTxFilter} startEdit={startEdit} deleteTx={deleteTx}/>}
+        {tab==="allocator"&&<AllocPage salInput={salInput} setSalInput={setSalInput} handleSalary={handleSalary} parsedSal={parsedSal} alloc={alloc} monthsLeft={monthsLeft} totalWealth={totalWealth} goalPct={goalPct} {...bp}/>}
+      </div>
+
+      {/* Bottom nav */}
+      <div style={{position:"fixed",bottom:0,left:0,right:0,background:"#0f172a",borderTop:"1px solid #1e293b",display:"flex",padding:"4px 0 8px",zIndex:40}}>
+        {TABS.map(t=>(
+          <button key={t.id} className={`tab-btn ${tab===t.id?"active":""}`} onClick={()=>setTab(t.id)}>
+            <span style={{fontSize:18}}>{t.icon}</span><span>{t.label}</span>
+            {t.id==="dashboard"&&anyOver&&<span className="alert-dot"/>}
+          </button>
+        ))}
+      </div>
+
+      {/* Transaction Form */}
+      {showForm&&(
+        <div className="modal-bg" onClick={e=>{if(e.target===e.currentTarget)setShowForm(false)}}>
+          <div className="modal">
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:20}}>
+              <h3 style={{fontFamily:"'Instrument Serif',serif",fontSize:20}}>{editId?"编辑交易":"新增交易"}</h3>
+              <button className="btn-sm" onClick={()=>setShowForm(false)}>✕</button>
+            </div>
+            <div style={{display:"flex",background:"#0b0e14",borderRadius:12,padding:4,marginBottom:16}}>
+              {["expense","income"].map(t=>(
+                <button key={t} className={`seg-btn ${formData.type===t?"active":""}`} onClick={()=>setFormData(f=>({...f,type:t,category:t==="expense"?"food":"salary"}))}>
+                  {t==="expense"?"💸 支出":"💰 收入"}
+                </button>
+              ))}
+            </div>
+            <div style={{marginBottom:16}}>
+              <label style={{fontSize:12,color:"#64748b",marginBottom:8,display:"block"}}>分类</label>
+              <div style={{display:"flex",flexWrap:"wrap",gap:8}}>
+                {(formData.type==="expense"?EXPENSE_CATS:INCOME_CATS).map(c=>(
+                  <button key={c.id} className="chip" onClick={()=>setFormData(f=>({...f,category:c.id}))}
+                    style={{background:formData.category===c.id?c.color+"33":"#1e293b",border:`1px solid ${formData.category===c.id?c.color:"#334155"}`,color:formData.category===c.id?c.color:"#94a3b8"}}>
+                    {c.icon} {c.label}
+                  </button>
+                ))}
+              </div>
+              {formData.type==="expense"&&parsedSal>0&&(()=>{
+                const amt=parseFloat(formData.amount)||0,isW=WANTS_CATS.includes(formData.category),isN=NEEDS_CATS.includes(formData.category);
+                const proj=isW?wantsSpent+amt:isN?needsSpent+amt:0,bgt=isW?alloc.wants:isN?alloc.needs:0;
+                if(bgt>0&&proj>bgt&&amt>0) return <div style={{marginTop:10,background:"#ef444411",border:"1px solid #ef444433",borderRadius:10,padding:"8px 12px",fontSize:12,color:"#fca5a5"}}>⚠️ 加入后 <b>{isW?"生活品质":"必要支出"}</b> 将超出预算 {fmt(proj-bgt)}</div>;
+                return null;
+              })()}
+            </div>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:12}}>
+              <div><label style={{fontSize:12,color:"#64748b",display:"block",marginBottom:6}}>日期</label><input type="date" value={formData.date} onChange={e=>setFormData(f=>({...f,date:e.target.value}))}/></div>
+              <div><label style={{fontSize:12,color:"#64748b",display:"block",marginBottom:6}}>金额 (RM)</label><input type="number" placeholder="0.00" value={formData.amount} onChange={e=>setFormData(f=>({...f,amount:e.target.value}))}/></div>
+            </div>
+            <div style={{marginBottom:12}}>
+              <label style={{fontSize:12,color:"#64748b",display:"block",marginBottom:6}}>交易方式</label>
+              <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+                {PAY_METHODS.map(p=>(
+                  <button key={p.id} className="chip" onClick={()=>setFormData(f=>({...f,method:p.id}))}
+                    style={{background:formData.method===p.id?"#34d39933":"#1e293b",border:`1px solid ${formData.method===p.id?"#34d399":"#334155"}`,color:formData.method===p.id?"#34d399":"#64748b",flex:1,justifyContent:"center"}}>
+                    {p.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div style={{marginBottom:20}}>
+              <label style={{fontSize:12,color:"#64748b",display:"block",marginBottom:6}}>备注</label>
+              <input type="text" placeholder="添加备注..." value={formData.note} onChange={e=>setFormData(f=>({...f,note:e.target.value}))}/>
+            </div>
+            <button className="btn-primary" style={{width:"100%"}} onClick={submitForm}>{editId?"保存修改":"记录交易"}</button>
+          </div>
+        </div>
+      )}
+      {editBank&&<BankModal bank={editBank} onClose={()=>setEditBank(null)} onSave={upd=>updateBank(editBank.id,upd)}/>}
+      {overAlert&&<OverAlert data={overAlert} onClose={()=>setOverAlert(null)}/>}
+    </div>
+  );
+}
+
+// ── Page components ───────────────────────────────────────────────────────────
+const GRADIENTS=["linear-gradient(135deg,#1e3a5f,#2d6a9f)","linear-gradient(135deg,#1a1a2e,#0f3460)","linear-gradient(135deg,#1b4332,#2d6a4f)","linear-gradient(135deg,#4a1942,#7b2d8b)"];
+
+function WealthPage({banks,setEditBank,totalWealth,goalPct,monthsLeft,alloc,parsedSal,salInput,setSalInput,handleSalary,salary}) {
+  const reachDate=monthsLeft?new Date(Date.now()+monthsLeft*30*86400000).toLocaleString("zh-MY",{year:"numeric",month:"long"}):null;
+  return (
+    <div className="fade-up">
+      <div style={{background:"linear-gradient(135deg,#0f2027,#203a43,#2c5364)",borderRadius:24,padding:24,marginBottom:16,position:"relative",overflow:"hidden"}}>
+        <div style={{position:"absolute",top:-30,right:-30,width:120,height:120,borderRadius:"50%",background:"rgba(52,211,153,.08)"}}/>
+        <div style={{fontSize:11,color:"#6ee7b7",letterSpacing:2,textTransform:"uppercase",marginBottom:4}}>总资产</div>
+        <div style={{fontFamily:"'Instrument Serif',serif",fontSize:38,color:"#fff",marginBottom:2}}>{fmt(totalWealth)}</div>
+        <div style={{fontSize:12,color:"rgba(255,255,255,.5)",marginBottom:16}}>跨 {banks.length} 个户口</div>
+        <div style={{background:"rgba(0,0,0,.3)",borderRadius:12,padding:12}}>
+          <div style={{display:"flex",justifyContent:"space-between",marginBottom:8}}>
+            <span style={{fontSize:12,color:"#6ee7b7"}}>🎯 目标 RM100k</span>
+            <span style={{fontSize:12,color:"#34d399",fontWeight:700}}>{goalPct.toFixed(1)}%</span>
+          </div>
+          <div style={{background:"rgba(255,255,255,.1)",borderRadius:6,height:10,overflow:"hidden"}}>
+            <div style={{width:`${goalPct}%`,height:"100%",background:"linear-gradient(90deg,#34d399,#059669)",borderRadius:6,transition:"width 1s"}}/>
+          </div>
+          <div style={{display:"flex",justifyContent:"space-between",marginTop:6}}>
+            <span style={{fontSize:11,color:"rgba(255,255,255,.4)"}}>还差 {fmt(Math.max(TARGET-totalWealth,0))}</span>
+            {monthsLeft?<span style={{fontSize:11,color:"#34d399"}}>≈ {monthsLeft} 个月 · {reachDate}</span>:totalWealth>=TARGET?<span style={{fontSize:11,color:"#34d399"}}>🎉 已达目标！</span>:<span style={{fontSize:11,color:"#fbbf24"}}>请设定薪水</span>}
+          </div>
+        </div>
+      </div>
+      <div style={{fontSize:12,color:"#64748b",marginBottom:10,paddingLeft:2}}>🏦 银行户口 <span style={{fontSize:11,color:"#334155"}}>（点击更新余额）</span></div>
+      {banks.map((b,i)=>(
+        <div key={b.id} className="bank-card" style={{background:GRADIENTS[i%GRADIENTS.length],marginBottom:12}} onClick={()=>setEditBank(b)}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:14}}>
+            <div>
+              <div style={{fontSize:11,color:"rgba(255,255,255,.5)",letterSpacing:1,textTransform:"uppercase",marginBottom:4}}>储蓄户口</div>
+              <div style={{fontSize:18,fontWeight:700,color:"#fff"}}>{b.name}</div>
+            </div>
+            <div style={{background:"rgba(255,255,255,.12)",borderRadius:8,padding:"5px 10px",fontSize:11,color:"rgba(255,255,255,.8)"}}>✏️ 更新</div>
+          </div>
+          <div style={{fontFamily:"'Instrument Serif',serif",fontSize:30,color:"#fff",marginBottom:10}}>{fmt(b.balance)}</div>
+          <div style={{display:"flex",justifyContent:"space-between",fontSize:11,color:"rgba(255,255,255,.4)",marginBottom:8}}>
+            <span>最后更新 {b.last_updated||b.lastUpdated}</span>
+            <span>占总资产 {totalWealth>0?((b.balance/totalWealth)*100).toFixed(1):0}%</span>
+          </div>
+          <div style={{background:"rgba(0,0,0,.3)",borderRadius:4,height:4,overflow:"hidden"}}>
+            <div style={{width:`${Math.min((b.balance/TARGET)*100,100)}%`,height:"100%",background:"rgba(52,211,153,.5)",borderRadius:4}}/>
+          </div>
+          <div style={{fontSize:10,color:"rgba(255,255,255,.3)",marginTop:4}}>占 RM100k 目标 {Math.min((b.balance/TARGET)*100,100).toFixed(1)}%</div>
+        </div>
+      ))}
+      <div className="card" style={{padding:16,marginTop:4}}>
+        <div style={{fontSize:12,color:"#64748b",marginBottom:12}}>💰 本月薪水分配</div>
+        {parsedSal>0?(
+          <div>
+            {[{key:"savings",label:"储蓄/投资",icon:"🏦",color:"#34d399",desc:"ASB · 定存 · 基金"},{key:"needs",label:"必要支出",icon:"🏠",color:"#60a5fa",desc:"房租 · 伙食 · 交通"},{key:"wants",label:"生活品质",icon:"✨",color:"#f472b6",desc:"娱乐 · 购物 · 社交"}].map(c=>(
+              <div key={c.key} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"8px 0",borderBottom:"1px solid #1e293b"}}>
+                <div style={{display:"flex",alignItems:"center",gap:8}}>
+                  <span style={{fontSize:16}}>{c.icon}</span>
+                  <div><div style={{fontSize:13,fontWeight:500}}>{c.label}</div><div style={{fontSize:10,color:"#475569"}}>{c.desc}</div></div>
+                </div>
+                <div style={{textAlign:"right"}}><div style={{fontSize:16,fontWeight:700,color:c.color}}>{fmt(alloc[c.key])}</div><div style={{fontSize:10,color:"#475569"}}>{SPLIT[c.key]}%</div></div>
+              </div>
+            ))}
+            <div style={{paddingTop:10,fontSize:12,color:"#475569",textAlign:"center"}}>基于薪水 {fmt(parseFloat(salary)||0)}</div>
+          </div>
+        ):(
+          <div>
+            <div style={{fontSize:13,color:"#475569",marginBottom:10}}>输入本月薪水查看分配</div>
+            <div style={{display:"flex",gap:10}}>
+              <div style={{flex:1,position:"relative"}}>
+                <span style={{position:"absolute",left:12,top:"50%",transform:"translateY(-50%)",color:"#34d399",fontWeight:700}}>RM</span>
+                <input type="number" placeholder="5940.30" value={salInput} onChange={e=>setSalInput(e.target.value)} onKeyDown={e=>e.key==="Enter"&&handleSalary()} style={{paddingLeft:44}}/>
+              </div>
+              <button className="btn-primary" style={{padding:"10px 18px"}} onClick={handleSalary}>计算</button>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+const s3=(arr,type)=>arr.filter(t=>t.type===type).reduce((s,t)=>s+t.amount,0);
+
+function DashPage({txs,filterYear,totalWealth,goalPct,wantsSpent,needsSpent,alloc,parsedSal,foodSpent,filterMonth}) {
+  const now=new Date(),thisMo=`${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,"0")}`;
+  const txMo=txs.filter(t=>t.date&&t.date.startsWith(thisMo));
+  const income=s3(txMo,"income"),expense=s3(txMo,"expense");
+  const recent=[...txs].sort((a,b)=>(b.date||"").localeCompare(a.date||"")).slice(0,5);
+  const mData=MONTHS_ZH.map((_,i)=>{const p=`${filterYear}-${String(i+1).padStart(2,"0")}`;const t=txs.filter(x=>x.date&&x.date.startsWith(p));return{inc:s3(t,"income"),exp:s3(t,"expense")};});
+  const maxV=Math.max(...mData.map(d=>Math.max(d.inc,d.exp)),1);
+  return (
+    <div className="fade-up">
+      <div style={{background:"linear-gradient(135deg,#0f2027,#203a43)",borderRadius:14,padding:"12px 16px",marginBottom:16,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+        <div><div style={{fontSize:10,color:"#6ee7b7",letterSpacing:1}}>总资产</div><div style={{fontSize:20,fontWeight:700,color:"#fff"}}>{fmt(totalWealth)}</div></div>
+        <div style={{textAlign:"right"}}>
+          <div style={{fontSize:10,color:"#6ee7b7",marginBottom:4}}>RM100k 目标</div>
+          <div style={{background:"rgba(255,255,255,.1)",borderRadius:4,height:6,width:100,overflow:"hidden"}}><div style={{width:`${goalPct}%`,height:"100%",background:"linear-gradient(90deg,#34d399,#059669)"}}/></div>
+          <div style={{fontSize:10,color:"#34d399",marginTop:2}}>{goalPct.toFixed(1)}%</div>
+        </div>
+      </div>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:16}}>
+        {[{label:"本月收入",val:income,color:"#34d399",icon:"↑"},{label:"本月支出",val:expense,color:"#f87171",icon:"↓"}].map(s=>(
+          <div key={s.label} className="card" style={{padding:16,borderColor:s.color+"22"}}>
+            <div style={{fontSize:12,color:"#64748b",marginBottom:6}}>{s.icon} {s.label}</div>
+            <div style={{fontSize:18,fontWeight:700,color:s.color}}>{fmt(s.val)}</div>
+          </div>
+        ))}
+      </div>
+      <div className="card" style={{padding:16,marginBottom:16}}>
+        <div style={{fontSize:12,color:"#64748b",marginBottom:8}}>本月结余</div>
+        <div style={{fontSize:26,fontFamily:"'Instrument Serif',serif",color:income-expense>=0?"#34d399":"#f87171"}}>{income-expense>=0?"+":"-"}{fmt(Math.abs(income-expense))}</div>
+        <div className="pbar-bg" style={{marginTop:10}}><div className="pbar-fill" style={{width:income>0?`${Math.min((expense/income)*100,100)}%`:"0%",background:expense/income>0.8?"#ef4444":"#34d399"}}/></div>
+        <div style={{fontSize:11,color:"#475569",marginTop:6}}>支出占收入 {income>0?((expense/income)*100).toFixed(1):0}%</div>
+      </div>
+      <FoodCard foodSpent={foodSpent} filterYear={filterYear} filterMonth={filterMonth}/>
+      {parsedSal>0&&<div className="card" style={{padding:16,marginBottom:16}}><div style={{fontSize:12,color:"#64748b",marginBottom:12}}>📊 预算状态</div><BudgetRow label="生活品质" icon="✨" spent={wantsSpent} budget={alloc.wants} color="#f472b6"/><BudgetRow label="必要支出" icon="🏠" spent={needsSpent} budget={alloc.needs} color="#60a5fa"/></div>}
+      <div className="card" style={{padding:16,marginBottom:16}}>
+        <div style={{fontSize:12,color:"#64748b",marginBottom:12}}>{filterYear} 年收支趋势</div>
+        <div style={{display:"flex",alignItems:"flex-end",gap:4,height:60}}>
+          {mData.map((d,i)=>(
+            <div key={i} style={{flex:1,display:"flex",flexDirection:"column",gap:2,alignItems:"center"}}>
+              <div style={{width:"100%",height:`${(d.inc/maxV)*52}px`,background:"#34d39444",borderRadius:"3px 3px 0 0",minHeight:d.inc>0?2:0}}/>
+              <div style={{width:"100%",height:`${(d.exp/maxV)*52}px`,background:"#f8717144",borderRadius:"3px 3px 0 0",minHeight:d.exp>0?2:0}}/>
+            </div>
+          ))}
+        </div>
+        <div style={{display:"flex",gap:2,marginTop:4}}>{MONTHS_ZH.map((_,i)=><div key={i} style={{flex:1,fontSize:8,color:"#334155",textAlign:"center"}}>{i+1}</div>)}</div>
+        <div style={{display:"flex",gap:12,marginTop:8}}><span style={{fontSize:11,color:"#34d399"}}>■ 收入</span><span style={{fontSize:11,color:"#f87171"}}>■ 支出</span></div>
+      </div>
+      <div className="card" style={{padding:16}}>
+        <div style={{fontSize:12,color:"#64748b",marginBottom:12}}>最近交易</div>
+        {recent.length===0&&<div style={{color:"#334155",fontSize:13,textAlign:"center",padding:20}}>暂无记录</div>}
+        {recent.map(tx=>{const cat=getCat(tx.category);return(
+          <div key={tx.id} className="tx-row">
+            <div style={{width:36,height:36,borderRadius:10,background:cat.color+"22",display:"flex",alignItems:"center",justifyContent:"center",fontSize:18,flexShrink:0}}>{cat.icon}</div>
+            <div style={{flex:1,minWidth:0}}><div style={{fontSize:13,fontWeight:500}}>{cat.label}</div><div style={{fontSize:11,color:"#475569"}}>{tx.date} · {tx.note||"—"}</div></div>
+            <div style={{fontSize:14,fontWeight:600,color:tx.type==="income"?"#34d399":"#f87171",flexShrink:0}}>{tx.type==="income"?"+":"-"}{fmt(tx.amount)}</div>
+          </div>
+        );})}
+      </div>
+    </div>
+  );
+}
+
+function MonthPage({txMonth,monthIncome,monthExpense,filterYear,filterMonth,setFilterMonth,setFilterYear,catBreakdown,startEdit,deleteTx,wantsSpent,needsSpent,alloc,parsedSal,foodSpent}) {
+  const expCats=catBreakdown(txMonth,"expense"),maxExp=expCats.length?expCats[0].total:1;
+  return (
+    <div className="fade-up">
+      <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:16}}>
+        <button className="btn-sm" onClick={()=>{const d=new Date(filterYear,filterMonth-1);setFilterYear(d.getFullYear());setFilterMonth(d.getMonth());}}>‹</button>
+        <div style={{flex:1,textAlign:"center",fontFamily:"'Instrument Serif',serif",fontSize:18}}>{filterYear}年 {MONTHS_ZH[filterMonth]}</div>
+        <button className="btn-sm" onClick={()=>{const d=new Date(filterYear,filterMonth+1);setFilterYear(d.getFullYear());setFilterMonth(d.getMonth());}}>›</button>
+      </div>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:10,marginBottom:16}}>
+        {[{l:"收入",v:monthIncome,c:"#34d399"},{l:"支出",v:monthExpense,c:"#f87171"},{l:"结余",v:monthIncome-monthExpense,c:monthIncome-monthExpense>=0?"#34d399":"#f87171"}].map(s=>(
+          <div key={s.l} className="card" style={{padding:12,borderColor:s.c+"22"}}><div style={{fontSize:10,color:"#64748b"}}>{s.l}</div><div style={{fontSize:15,fontWeight:700,color:s.c,marginTop:4}}>{fmt(s.v)}</div></div>
+        ))}
+      </div>
+      <FoodCard foodSpent={foodSpent} filterYear={filterYear} filterMonth={filterMonth}/>
+      {parsedSal>0&&<div className="card" style={{padding:16,marginBottom:16}}><div style={{fontSize:12,color:"#64748b",marginBottom:12}}>📊 预算追踪</div><BudgetRow label="生活品质" icon="✨" spent={wantsSpent} budget={alloc.wants} color="#f472b6"/><BudgetRow label="必要支出" icon="🏠" spent={needsSpent} budget={alloc.needs} color="#60a5fa"/></div>}
+      {expCats.length>0&&<div className="card" style={{padding:16,marginBottom:16}}><div style={{fontSize:12,color:"#64748b",marginBottom:12}}>本月支出分类</div>{expCats.map(c=>(<div key={c.id} style={{marginBottom:10}}><div style={{display:"flex",justifyContent:"space-between",marginBottom:4}}><span style={{fontSize:13}}>{c.icon} {c.label}</span><span style={{fontSize:13,color:c.color,fontWeight:600}}>{fmt(c.total)}</span></div><PBar pct={(c.total/maxExp)*100} color={c.color}/></div>))}</div>}
+      <div className="card" style={{padding:16}}>
+        <div style={{fontSize:12,color:"#64748b",marginBottom:12}}>本月账单 ({txMonth.length} 笔)</div>
+        {txMonth.length===0&&<div style={{color:"#334155",fontSize:13,textAlign:"center",padding:20}}>本月暂无记录</div>}
+        {txMonth.map(tx=>{const cat=getCat(tx.category);return(
+          <div key={tx.id} className="tx-row">
+            <div style={{width:36,height:36,borderRadius:10,background:cat.color+"22",display:"flex",alignItems:"center",justifyContent:"center",fontSize:18,flexShrink:0}}>{cat.icon}</div>
+            <div style={{flex:1,minWidth:0}}><div style={{fontSize:13,fontWeight:500}}>{cat.label}</div><div style={{fontSize:11,color:"#475569"}}>{tx.date} · {tx.note||"—"}</div></div>
+            <div style={{display:"flex",gap:6,alignItems:"center"}}>
+              <div style={{fontSize:14,fontWeight:600,color:tx.type==="income"?"#34d399":"#f87171"}}>{tx.type==="income"?"+":"-"}{fmt(tx.amount)}</div>
+              <button className="btn-sm" onClick={()=>startEdit(tx)} style={{padding:"3px 8px"}}>✏️</button>
+              <button className="btn-sm btn-danger" onClick={()=>deleteTx(tx.id)} style={{padding:"3px 8px"}}>🗑</button>
+            </div>
+          </div>
+        );})}
+      </div>
+    </div>
+  );
+}
+
+function TxPage({txs,txFilter,setTxFilter,startEdit,deleteTx}) {
+  return (
+    <div className="fade-up">
+      <div style={{display:"flex",background:"#111827",borderRadius:12,padding:4,marginBottom:16}}>
+        {[{v:"all",l:"全部"},{v:"expense",l:"💸 支出"},{v:"income",l:"💰 收入"}].map(f=>(
+          <button key={f.v} className={`seg-btn ${txFilter===f.v?"active":""}`} onClick={()=>setTxFilter(f.v)}>{f.l}</button>
+        ))}
+      </div>
+      <div className="card" style={{padding:16}}>
+        <div style={{fontSize:12,color:"#64748b",marginBottom:12}}>交易流水 ({txs.length} 笔)</div>
+        {txs.length===0&&<div style={{color:"#334155",fontSize:13,textAlign:"center",padding:20}}>暂无记录</div>}
+        {txs.map(tx=>{const cat=getCat(tx.category),method=PAY_METHODS.find(p=>p.id===tx.method)||{label:tx.method};return(
+          <div key={tx.id} className="tx-row">
+            <div style={{width:38,height:38,borderRadius:10,background:cat.color+"22",display:"flex",alignItems:"center",justifyContent:"center",fontSize:19,flexShrink:0}}>{cat.icon}</div>
+            <div style={{flex:1,minWidth:0}}>
+              <div style={{display:"flex",alignItems:"center",gap:6}}><span style={{fontSize:13,fontWeight:500}}>{cat.label}</span><span style={{fontSize:10,background:"#1e293b",borderRadius:6,padding:"1px 6px",color:"#64748b"}}>{method.label}</span></div>
+              <div style={{fontSize:11,color:"#475569",marginTop:1}}>{tx.date}{tx.note?` · ${tx.note}`:""}</div>
+            </div>
+            <div style={{display:"flex",gap:6,alignItems:"center",flexShrink:0}}>
+              <div style={{fontSize:14,fontWeight:600,color:tx.type==="income"?"#34d399":"#f87171"}}>{tx.type==="income"?"+":"-"}{fmt(tx.amount)}</div>
+              <button className="btn-sm" onClick={()=>startEdit(tx)} style={{padding:"3px 8px"}}>✏️</button>
+              <button className="btn-sm btn-danger" onClick={()=>deleteTx(tx.id)} style={{padding:"3px 8px"}}>🗑</button>
+            </div>
+          </div>
+        );})}
+      </div>
+    </div>
+  );
+}
+
+function AllocPage({salInput,setSalInput,handleSalary,parsedSal,alloc,monthsLeft,totalWealth,goalPct,wantsSpent,needsSpent,foodSpent,filterYear,filterMonth}) {
+  return (
+    <div className="fade-up">
+      <div className="card" style={{padding:16,marginBottom:16}}>
+        <div style={{fontSize:12,color:"#64748b",marginBottom:6}}>🎯 RM100k 目标（基于总资产）</div>
+        <div style={{display:"flex",justifyContent:"space-between",marginBottom:8}}><span style={{fontSize:13,color:"#34d399",fontWeight:600}}>{fmt(totalWealth)}</span><span style={{fontSize:13,color:"#475569"}}>/ RM 100,000</span></div>
+        <div className="pbar-bg" style={{height:8}}><div className="pbar-fill" style={{width:`${goalPct}%`,background:"linear-gradient(90deg,#34d399,#059669)"}}/></div>
+        <div style={{fontSize:11,color:"#334155",marginTop:6,textAlign:"right"}}>{goalPct.toFixed(1)}% · 还差 {fmt(Math.max(TARGET-totalWealth,0))}</div>
+      </div>
+      <div className="card" style={{padding:16,marginBottom:16}}>
+        <label style={{fontSize:12,color:"#64748b",display:"block",marginBottom:8}}>输入本月薪水</label>
+        <div style={{display:"flex",gap:10}}>
+          <div style={{flex:1,position:"relative"}}>
+            <span style={{position:"absolute",left:12,top:"50%",transform:"translateY(-50%)",color:"#34d399",fontWeight:700}}>RM</span>
+            <input type="number" placeholder="5940.30" value={salInput} onChange={e=>setSalInput(e.target.value)} onKeyDown={e=>e.key==="Enter"&&handleSalary()} style={{paddingLeft:44}}/>
+          </div>
+          <button className="btn-primary" style={{padding:"10px 20px"}} onClick={handleSalary}>计算</button>
+        </div>
+      </div>
+      {parsedSal>0&&(
+        <div>
+          {[{key:"savings",label:"储蓄/投资",icon:"🏦",color:"#34d399",desc:"ASB · 定存 · 基金"},{key:"needs",label:"必要支出",icon:"🏠",color:"#60a5fa",desc:"房租 · 伙食 · 交通"},{key:"wants",label:"生活品质",icon:"✨",color:"#f472b6",desc:"娱乐 · 购物 · 社交"}].map(c=>(
+            <div key={c.key} className="card" style={{padding:16,marginBottom:12,borderColor:c.color+"22"}}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
+                <div><span style={{fontSize:18,marginRight:8}}>{c.icon}</span><span style={{fontWeight:600}}>{c.label}</span><div style={{fontSize:11,color:"#475569",marginTop:3,paddingLeft:28}}>{c.desc}</div></div>
+                <div style={{textAlign:"right"}}><div style={{fontSize:22,fontWeight:700,color:c.color}}>{fmt(alloc[c.key])}</div><div style={{fontSize:11,color:"#475569"}}>{SPLIT[c.key]}%</div></div>
+              </div>
+              <PBar pct={SPLIT[c.key]} color={c.color}/>
+            </div>
+          ))}
+          <FoodCard foodSpent={foodSpent} filterYear={filterYear} filterMonth={filterMonth}/>
+          <div className="card" style={{padding:16,marginBottom:12}}><div style={{fontSize:12,color:"#64748b",marginBottom:12}}>📊 本月实际 vs 预算</div><BudgetRow label="生活品质" icon="✨" spent={wantsSpent} budget={alloc.wants} color="#f472b6"/><BudgetRow label="必要支出" icon="🏠" spent={needsSpent} budget={alloc.needs} color="#60a5fa"/></div>
+          {monthsLeft&&<div className="card" style={{padding:16,textAlign:"center",borderColor:"#34d39933"}}><div style={{fontSize:12,color:"#64748b"}}>按此储蓄速度</div><div style={{fontFamily:"'Instrument Serif',serif",fontSize:36,color:"#34d399",margin:"6px 0"}}>{monthsLeft} 个月</div><div style={{fontSize:12,color:"#475569"}}>≈ {(monthsLeft/12).toFixed(1)} 年达到 RM100k</div></div>}
+        </div>
+      )}
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(<App/>);
+</script>
+</body>
+</html>
